@@ -1,0 +1,279 @@
+@Slf4j
+@RestController
+@RequiredArgsConstructor
+@RequestMapping()
+@Data - setter,getter,toString,toHash,equal
+@NoArgsConstructor - create empty constructor
+@AllArgsConstructor - create full constructors
+@Builder -  It lets you write cleaner, more readable code when creating objects.
+@JsonIgnore - The field will be invisible in your API responses.
+@RequiredArgsConstructor -
+
+implements Serializable - interaction with Db and serialization
+static - 	call the method leaving out creating the object
+
+
+DataBase
+--------------------------------------------------
+
+SERIAL	- int / Integer	Только для мелких справочников, autoincreament
+BIGSERIAL -	long / Long	Для всех основных таблиц, autoincreament
+Integer - can be null, used for new variables without id, manual
+bigint - like integer but larger for id,manual
+VARCHAR(n) -	До n символов	Фиксированная верхняя граница (email, имя, телефон)
+TEXT -	Неограниченно (до 1 ГБ)	Переменная длина (статьи, комментарии, JSON, описание)
+NUMERIC(14,2) - for money
+
+
+Entities
+------------------------------------------------
+1)
+// Owning side (User owns Address)
+@OneToOne(fetch = FetchType.LAZY)
+@JoinColumn(name = "profile_id") owner
+private UserProfile profile;
+----------------------------------
+// Non-owning side — no fetch type (it's ignored anyway)
+@OneToOne(mappedBy = "profile",unique = true)
+private User user;
+
+2)
+// Owning side — make it LAZY!
+@ManyToOne
+@JoinColumn(name = "user_id", nullable = false,fetch = FetchType.LAZY) owner
+private User user;
+-----------------------------------------------------------
+// Non-owning side — default LAZY is good
+@OneToMany(mappedBy = "user",  cascade = {CascadeType.PERSIST, CascadeType.MERGE}, orphanRemoval = true)
+private List<Post> posts;
+
+3)
+@ManyToMany// ← LAZY by default
+    @JoinTable(
+        name = "user_roles",
+        joinColumns = @JoinColumn(name = "user_id"),
+        inverseJoinColumns = @JoinColumn(name = "role_id")
+    ) owner
+    private Set<Role> roles = new HashSet<>();
+------------------------------------------------------------
+
+@ManyToMany(mappedBy = "roles")// ← LAZY by default
+private Set<User> users = new HashSet<>();
+-------------------------
+
+
+    ALWAYS make @ManyToOne the owner
+OWNER = таблица, где лежит FOREIGN KEY
+
+    PERSIST	Сохраняет связанные сущности при save()	Почти всегда
+MERGE	Обновляет связанные сущности при save()	Почти всегда
+REMOVE	Удаляет связанные сущности при delete()	Осторожно!
+REFRESH	Перезагружает связанные сущности из БД	Редко
+DETACH	Отсоединяет связанные сущности от сессии	Очень редко
+ALL	Всё вышеперечисленное	Удобно, но опасно
+cascade = CascadeType.ALL
+
+    ❓1. Если удалить родителя — нужен ли ребёнок?
+❌ нет → Cascade.ALL
+✅ да → НЕ использовать
+❓2. Может ли ребёнок жить сам?
+❌ нет → Cascade
+✅ да → НЕ Cascade
+❓3. Есть ли shared usage?
+✅ да → НЕ Cascade
+
+    orphanRemoval = true
+
+   Feature	CascadeType.REMOVE	orphanRemoval = true
+When it triggers	When parent is deleted	When child is removed from collection
+
+Collection	Может содержать дубликаты	❌ Не используйте
+List	Может содержать дубликаты, порядок сохраняется	🟡 Для упорядоченных связей
+Set	Гарантирует уникальность	✅ Всегда для ManyToMany!
+
+
+   Instead of EAGER, use query-level fetching:
+
+Option A: JOIN FETCH in JPQL
+@Query("SELECT u FROM User u LEFT JOIN FETCH u.address WHERE u.id = :id")
+User findUserWithAddress(@Param("id") Long id);
+
+Option B: @EntityGraph
+@EntityGraph(attributePaths = "courses")
+Student findStudentWithCourses(Long id);
+
+
+  helpers needed in case: mappedBy
+@ManyToMany
+@OneToMany
+@OneToOne sometimes
+
+-------------------------
+
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+IamResponse
+
+---------------------------------
+@Data
+@Entity
+@Table()
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+entity and enums
+------------------------------
+
+@Slf4j
+@RestController
+@RequiredArgsConstructor
+@RequestMapping()
+controller - interaction with client
+create
+update
+delete
+-------------------------------
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+Dto - data needed
+
+Request DTO:
+✅ Only fields the client needs to send
+✅ Validation annotations (@NotNull, @Min, @NotBlank)
+❌ No id
+❌ No timestamps
+❌ No calculated fields
+❌ No password
+❌ No full nested entities
+
+Response DTO:
+✅ id
+✅ All relevant business fields
+✅ Flattened nested fields (ownerName not owner object)
+✅ Calculated fields (rating, decision)
+✅ Timestamps
+❌ No password
+❌ No full nested entities
+❌ No JPA annotations
+❌ No internal flags
+---------------------------------
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+request - from client
+------------------------------------
+
+@Mapper(
+        componentModel = "spring",
+        nullValuePropertyMappingStrategy = NullValuePropertyMappingStrategy.IGNORE,
+        imports = {DateTimeUtils.class, Object.class}
+)
+
+mapper - bridge between request and entity
+
+    // ✅ Mapper ignores owner
+@Mapping(target = "owner", ignore = true)
+Company toEntity(NewCompanyRequest request);
+
+// ✅ You set it manually in service
+Company company = companyMapper.toEntity(request);
+company.setOwner(currentUser);  // ← set here manually
+companyRepository.save(company);
+
+    @Mapping(target = "loanAmount", source = "application.loanAmount")
+@Mapping(target = "companyName", source = "company.companyName")
+ApplicationDTO toDTO(Application application, Company company);
+
+
+---------------------------------------------
+
+@Repository
+extends JpaRepository<Report, Long>
+repository - interaction with db
+
+
+
+    JpaRepository<MonthlyFinancial, Long>	Базовые методы CRUD	90% случаев (save, findById, delete)
+JpaSpecificationExecutor<MonthlyFinancial>	Динамические сложные запросы	Когда нужно много фильтров (поиск с кучей условий)
+
+--------------------------------------
+
+@Service
+@RequiredArgsConstructor
+service and impl - main logic
+accessValidator for update,delete.
+
+---------------------------------------
+features:
+enum converter
+helpers
+
+--------------------------------------
+
+
+JWT
+-----------------------------------------------------------------------------------
+@Configuration
+@EnableWebSecurity
+@AllArgsConstructor
+@RequiredArgsConstructor
+@EnableMethodSecurity
+    SecurityConfig:
+PasswordEncoder
+AuthenticationManager
+DaoAuthenticationProvider
+SecurityFilterChain
+
+feature:
+public interface SecurityRules { void configure(AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry registry); }
+
+------------
+
+@Service
+@RequiredArgsConstructor
+    JwtService
+generateRefreshToken
+generateAccessToken
+getSecretKey
+generateToken
+parseToken
+validateToken
+getUserId
+getRoles
+getClaims
+
+
+-----------------
+@Slf4j
+@Component
+@RequiredArgsConstructor
+    JwtRequestFilter extends OncePerRequestFilter
+doFilterInternal
+sendError
+
+
+-------------------
+@Getter
+@Setter
+@Configuration
+@ConfigurationProperties(prefix = "jwt")
+JwtConfig
+
+--------------------
+
+@Component
+     AccessRestrictHandler implements AccessDeniedHandler
+
+----------------------
+    ApiUtil
+CreateAuthCookie
+
+
+---------------------
+
+
