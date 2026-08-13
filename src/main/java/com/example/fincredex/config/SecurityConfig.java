@@ -7,11 +7,9 @@ import com.example.fincredex.security.JwtService;
 import com.example.fincredex.security.filter.JwtRequestFilter;
 import com.example.fincredex.security.handler.AccessRestrictHandler;
 import com.example.fincredex.service.UserService;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.web.cors.CorsConfiguration;
-import org.springframework.web.cors.CorsConfigurationSource;
-import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -19,14 +17,11 @@ import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
-import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.client.userinfo.DefaultOAuth2UserService;
 import org.springframework.security.oauth2.client.userinfo.OAuth2UserRequest;
 import org.springframework.security.oauth2.client.userinfo.OAuth2UserService;
@@ -35,6 +30,9 @@ import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import java.util.List;
 
@@ -45,9 +43,8 @@ public class SecurityConfig {
 
     private final JwtRequestFilter jwtRequestFilter;
     private final AccessRestrictHandler accessRestrictHandler;
-    private final PasswordEncoder passwordEncoder;
     private final UserRepository userRepository;
-    private final JwtService  jwtService;
+    private final JwtService jwtService;
 
     @Value("${app.frontend-url}")
     private String frontendUrl;
@@ -66,109 +63,304 @@ public class SecurityConfig {
             "/webjars/**"
     };
 
-    private static final String[] PUBLIC_OPTION_ENDPOINTS = {"/**"};
+    // =========================================================
+    // DEBUG FRONTEND URL
+    // =========================================================
 
+    @PostConstruct
+    public void logFrontendUrl() {
+        System.out.println(
+                "CORS FRONTEND URL = " + frontendUrl
+        );
+    }
+
+    // =========================================================
+    // AUTHENTICATION MANAGER
+    // =========================================================
 
     @Bean
     public AuthenticationManager authenticationManager(
-            AuthenticationConfiguration config) throws Exception {
-        return config.getAuthenticationManager();
+            AuthenticationConfiguration configuration
+    ) throws Exception {
+
+        return configuration.getAuthenticationManager();
     }
+
+    // =========================================================
+    // DAO AUTH PROVIDER
+    // =========================================================
 
     @Bean
     public DaoAuthenticationProvider daoAuthenticationProvider(
             UserService userService,
-            PasswordEncoder passwordEncoder
+            org.springframework.security.crypto.password.PasswordEncoder passwordEncoder
     ) {
-        DaoAuthenticationProvider provider = new DaoAuthenticationProvider();
-        provider.setUserDetailsService(userService);
-        provider.setPasswordEncoder(passwordEncoder);
+
+        DaoAuthenticationProvider provider =
+                new DaoAuthenticationProvider();
+
+        provider.setUserDetailsService(
+                userService
+        );
+
+        provider.setPasswordEncoder(
+                passwordEncoder
+        );
+
         return provider;
     }
+
+    // =========================================================
+    // SECURITY FILTER CHAIN
+    // =========================================================
 
     @Bean
     public SecurityFilterChain securityFilterChain(
             HttpSecurity http,
             DaoAuthenticationProvider provider
     ) throws Exception {
+
         http
+
+                // IMPORTANT FOR FRONTEND REQUESTS
                 .cors(cors -> {})
+
+                // REST API + JWT
                 .csrf(AbstractHttpConfigurer::disable)
-                .authorizeHttpRequests(c -> c
-                        .requestMatchers(HttpMethod.POST, PUBLIC_POST_ENDPOINTS).permitAll()
-                        .requestMatchers(HttpMethod.GET, PUBLIC_GET_ENDPOINTS).permitAll()
-                        .requestMatchers(HttpMethod.OPTIONS, PUBLIC_OPTION_ENDPOINTS).permitAll()
-                        .requestMatchers("/oauth2/**", "/login/oauth2/**").permitAll()
+
+                // =================================================
+                // AUTHORIZATION
+                // =================================================
+
+                .authorizeHttpRequests(auth -> auth
+
+                        // Allow OPTIONS preflight request
+                        .requestMatchers(
+                                HttpMethod.OPTIONS,
+                                "/**"
+                        )
+                        .permitAll()
+
+                        // Public POST endpoints
+                        .requestMatchers(
+                                HttpMethod.POST,
+                                PUBLIC_POST_ENDPOINTS
+                        )
+                        .permitAll()
+
+                        // Public GET endpoints
+                        .requestMatchers(
+                                HttpMethod.GET,
+                                PUBLIC_GET_ENDPOINTS
+                        )
+                        .permitAll()
+
+                        // Google OAuth
+                        .requestMatchers(
+                                "/oauth2/**",
+                                "/login/oauth2/**"
+                        )
+                        .permitAll()
+
+                        // Swagger
                         .requestMatchers(
                                 "/v3/api-docs/**",
                                 "/swagger-ui/**",
                                 "/swagger-ui.html"
-                        ).permitAll()
-                        .anyRequest().authenticated()
+                        )
+                        .permitAll()
+
+                        // Everything else requires JWT
+                        .anyRequest()
+                        .authenticated()
                 )
-                .sessionManagement(c ->
-                        c.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
+
+                // =================================================
+                // SESSION
+                // =================================================
+
+                .sessionManagement(session ->
+                        session.sessionCreationPolicy(
+                                SessionCreationPolicy.IF_REQUIRED
+                        )
+                )
+
+                // =================================================
+                // ERROR HANDLING
+                // =================================================
+
                 .exceptionHandling(exceptions -> exceptions
-                        .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED))
-                        .accessDeniedHandler(accessRestrictHandler)
+
+                        .authenticationEntryPoint(
+                                new HttpStatusEntryPoint(
+                                        HttpStatus.UNAUTHORIZED
+                                )
+                        )
+
+                        .accessDeniedHandler(
+                                accessRestrictHandler
+                        )
                 )
-                .authenticationProvider(provider)
+
+                // =================================================
+                // PROVIDER
+                // =================================================
+
+                .authenticationProvider(
+                        provider
+                )
+
+                // =================================================
+                // GOOGLE OAUTH
+                // =================================================
+
                 .oauth2Login(oauth2 -> oauth2
+
                         .userInfoEndpoint(userInfo ->
-                                userInfo.userService(oauth2UserService()))
-                        .successHandler((request, response, authentication) -> {
+                                userInfo.userService(
+                                        oauth2UserService()
+                                )
+                        )
 
-                            OAuth2User oAuth2User =
-                                    (OAuth2User) authentication.getPrincipal();
+                        .successHandler(
+                                (
+                                        request,
+                                        response,
+                                        authentication
+                                ) -> {
 
-                            String email = oAuth2User.getAttribute("email");
+                                    OAuth2User oAuth2User =
+                                            (OAuth2User)
+                                                    authentication
+                                                            .getPrincipal();
 
-                            User user = userRepository.findByEmail(email)
-                                    .orElseThrow(() ->
-                                            new RuntimeException("User not found"));
+                                    String email =
+                                            oAuth2User
+                                                    .getAttribute(
+                                                            "email"
+                                                    );
 
-                            String jwt =
-                                    jwtService.generateAccessToken(user);
+                                    User user =
+                                            userRepository
+                                                    .findByEmail(
+                                                            email
+                                                    )
+                                                    .orElseThrow(
+                                                            () ->
+                                                                    new RuntimeException(
+                                                                            "User not found"
+                                                                    )
+                                                    );
 
-                            String redirectUrl =
-                                    frontendUrl
-                                            + "/oauth2/callback?token="
-                                            + jwt;
+                                    String jwt =
+                                            jwtService
+                                                    .generateAccessToken(
+                                                            user
+                                                    );
 
-                            response.sendRedirect(redirectUrl);
-                        })
+                                    String redirectUrl =
+                                            frontendUrl
+                                                    + "/oauth2/callback?token="
+                                                    + jwt;
+
+                                    response.sendRedirect(
+                                            redirectUrl
+                                    );
+                                }
+                        )
                 )
-                .addFilterBefore(jwtRequestFilter, UsernamePasswordAuthenticationFilter.class);
+
+                // =================================================
+                // JWT FILTER
+                // =================================================
+
+                .addFilterBefore(
+                        jwtRequestFilter,
+                        UsernamePasswordAuthenticationFilter.class
+                );
 
         return http.build();
     }
 
+    // =========================================================
+    // GOOGLE USER SERVICE
+    // =========================================================
+
     @Bean
-    public OAuth2UserService<OAuth2UserRequest, OAuth2User> oauth2UserService(){
+    public OAuth2UserService<
+            OAuth2UserRequest,
+            OAuth2User
+            > oauth2UserService() {
+
         return userRequest -> {
-            OAuth2User oAuth2User = new DefaultOAuth2UserService().loadUser(userRequest);
 
-            String email = oAuth2User.getAttribute("email");
-            String name = oAuth2User.getAttribute("name");
+            OAuth2User oAuth2User =
+                    new DefaultOAuth2UserService()
+                            .loadUser(
+                                    userRequest
+                            );
 
-            User user = userRepository.findByEmail(email).orElseGet(() -> {
-                User newUser = new User();
-                newUser.setEmail(email);
-                newUser.setUsername(name);
-                newUser.setPassword(null);
-                newUser.setRole(Role.USER);
-                return userRepository.save(newUser);
-            });
+            String email =
+                    oAuth2User.getAttribute(
+                            "email"
+                    );
+
+            String name =
+                    oAuth2User.getAttribute(
+                            "name"
+                    );
+
+            User user =
+                    userRepository
+                            .findByEmail(email)
+                            .orElseGet(() -> {
+
+                                User newUser =
+                                        new User();
+
+                                newUser.setEmail(
+                                        email
+                                );
+
+                                newUser.setUsername(
+                                        name
+                                );
+
+                                newUser.setPassword(
+                                        null
+                                );
+
+                                newUser.setRole(
+                                        Role.USER
+                                );
+
+                                return userRepository
+                                        .save(
+                                                newUser
+                                        );
+                            });
 
             return new DefaultOAuth2User(
-                    List.of(new SimpleGrantedAuthority(
-                            "ROLE_" + user.getRole().name()
-                    )),
+
+                    List.of(
+                            new SimpleGrantedAuthority(
+                                    "ROLE_"
+                                            + user
+                                            .getRole()
+                                            .name()
+                            )
+                    ),
+
                     oAuth2User.getAttributes(),
+
                     "email"
             );
         };
     }
+
+    // =========================================================
+    // CORS
+    // =========================================================
 
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
@@ -176,25 +368,65 @@ public class SecurityConfig {
         CorsConfiguration configuration =
                 new CorsConfiguration();
 
+        // =====================================================
+        // ALLOWED FRONTENDS
+        // =====================================================
+
         configuration.setAllowedOrigins(
-                List.of(frontendUrl)
+                List.of(
+                        "http://localhost:3000",
+                        frontendUrl
+                )
         );
 
-        configuration.setAllowedMethods(List.of(
-                "GET",
-                "POST",
-                "PUT",
-                "DELETE",
-                "OPTIONS"
-        ));
+        // =====================================================
+        // HTTP METHODS
+        // =====================================================
 
-        configuration.setAllowedHeaders(List.of("*"));
+        configuration.setAllowedMethods(
+                List.of(
+                        "GET",
+                        "POST",
+                        "PUT",
+                        "DELETE",
+                        "PATCH",
+                        "OPTIONS"
+                )
+        );
 
-        configuration.setExposedHeaders(List.of(
-                "Authorization"
-        ));
+        // =====================================================
+        // REQUEST HEADERS
+        // =====================================================
 
-        configuration.setAllowCredentials(true);
+        configuration.setAllowedHeaders(
+                List.of(
+                        "Authorization",
+                        "Content-Type",
+                        "Accept",
+                        "Origin",
+                        "X-Requested-With"
+                )
+        );
+
+        // =====================================================
+        // RESPONSE HEADERS
+        // =====================================================
+
+        configuration.setExposedHeaders(
+                List.of(
+                        "Authorization"
+                )
+        );
+
+        // Required if credentials/cookies are ever used
+        configuration.setAllowCredentials(
+                true
+        );
+
+        // Optional cache for preflight response
+        configuration.setMaxAge(
+                3600L
+        );
 
         UrlBasedCorsConfigurationSource source =
                 new UrlBasedCorsConfigurationSource();
@@ -206,5 +438,4 @@ public class SecurityConfig {
 
         return source;
     }
-
 }
